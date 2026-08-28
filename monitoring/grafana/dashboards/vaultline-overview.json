@@ -1,0 +1,22 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {"title":"HTTP Request Rate","type":"timeseries","gridPos":{"h":8,"w":12,"x":0,"y":0},"targets":[{"expr":"sum by (job) (rate(vaultline_http_requests_total[5m]))","legendFormat":"{{job}}"}]},
+    {"title":"HTTP P95 Latency","type":"timeseries","gridPos":{"h":8,"w":12,"x":12,"y":0},"targets":[{"expr":"histogram_quantile(0.95, sum by (job, le) (rate(vaultline_http_request_duration_seconds_bucket[5m])))","legendFormat":"{{job}}"}]},
+    {"title":"RabbitMQ Events Published","type":"stat","gridPos":{"h":6,"w":8,"x":0,"y":8},"targets":[{"expr":"sum(increase(vaultline_rabbitmq_events_published_total[1h]))"}]},
+    {"title":"RabbitMQ Events Consumed","type":"stat","gridPos":{"h":6,"w":8,"x":8,"y":8},"targets":[{"expr":"sum(increase(vaultline_rabbitmq_events_consumed_total[1h]))"}]},
+    {"title":"Payments Completed","type":"stat","gridPos":{"h":6,"w":8,"x":16,"y":8},"targets":[{"expr":"sum(increase(vaultline_payments_total{status=\"COMPLETED\"}[1h]))"}]},
+    {"title":"RabbitMQ Ready","type":"timeseries","gridPos":{"h":8,"w":12,"x":0,"y":14},"targets":[{"expr":"rabbitmq_identity_info","legendFormat":"broker"}]},
+    {"title":"Service Up","type":"timeseries","gridPos":{"h":8,"w":12,"x":12,"y":14},"targets":[{"expr":"up","legendFormat":"{{job}}"}]}
+  ],
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["vaultline", "observability"],
+  "templating": {"list": []},
+  "time": {"from":"now-1h","to":"now"},
+  "title": "Vaultline Overview",
+  "uid": "vaultline-overview",
+  "version": 1
+}

@@ -1,0 +1,50 @@
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+!**/.env.local.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Dependencies
+node_modules/
+
+# Build output and caches
+dist/
+.next/
+out/
+coverage/
+.turbo/
+.cache/
+*.tsbuildinfo
+
+# Logs and runtime data
+*.log
+logs.txt
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local monitoring and database data
+grafana_data/
+prometheus_data/
+postgres_data/
+redis_data/
+rabbitmq_data/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Test and temporary files
+.tmp/
+tmp/
+*.local

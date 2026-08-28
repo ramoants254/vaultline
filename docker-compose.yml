@@ -1,0 +1,313 @@
+services:
+  # ─── Infrastructure Layer ──────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: vaultline-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+      AUTH_DB_NAME: ${AUTH_DB_NAME:-auth_db}
+      AUTH_DB_USER: ${AUTH_DB_USER:-auth_user}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:-auth_pass}
+      LEDGER_DB_NAME: ${LEDGER_DB_NAME:-ledger_db}
+      LEDGER_DB_USER: ${LEDGER_DB_USER:-ledger_user}
+      LEDGER_DB_PASSWORD: ${LEDGER_DB_PASSWORD:-ledger_pass}
+      PAYMENTS_DB_NAME: ${PAYMENTS_DB_NAME:-payments_db}
+      PAYMENTS_DB_USER: ${PAYMENTS_DB_USER:-payments_user}
+      PAYMENTS_DB_PASSWORD: ${PAYMENTS_DB_PASSWORD:-payments_pass}
+      FRAUD_DB_NAME: ${FRAUD_DB_NAME:-fraud_db}
+      FRAUD_DB_USER: ${FRAUD_DB_USER:-fraud_user}
+      FRAUD_DB_PASSWORD: ${FRAUD_DB_PASSWORD:-fraud_pass}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-dbs.sh:/docker-entrypoint-initdb.d/init-dbs.sh
+    networks:
+      - vaultline-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER:-postgres} -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: vaultline-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - vaultline-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: vaultline-rabbitmq
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - vaultline-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_listener", "5672"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: vaultline-prometheus
+    restart: always
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - vaultline-network
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: vaultline-grafana
+    restart: always
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - vaultline-network
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: vaultline-postgres-exporter
+    restart: always
+    environment:
+      DATA_SOURCE_NAME: postgresql://postgres:postgres@postgres:5432/postgres?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - vaultline-network
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    container_name: vaultline-redis-exporter
+    restart: always
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - vaultline-network
+
+  # ─── Microservices Layer ─────────────────────────────────────────────
+  auth-service:
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+    container_name: vaultline-auth-service
+    restart: always
+    ports:
+      - "4001:4001"
+    environment:
+      PORT: 4001
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${AUTH_DB_NAME:-auth_db}
+      DB_USER: ${AUTH_DB_USER:-auth_user}
+      DB_PASSWORD: ${AUTH_DB_PASSWORD:-auth_pass}
+      DATABASE_URL: postgres://${AUTH_DB_USER:-auth_user}:${AUTH_DB_PASSWORD:-auth_pass}@postgres:5432/${AUTH_DB_NAME:-auth_db}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
+      JWT_SECRET: ${JWT_SECRET:-super_secret_jwt_key_vaultline}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-super_secret_refresh_key_vaultline}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - vaultline-network
+
+  ledger-service:
+    build:
+      context: .
+      dockerfile: services/ledger-service/Dockerfile
+    container_name: vaultline-ledger-service
+    restart: always
+    ports:
+      - "4002:4002"
+    environment:
+      PORT: 4002
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${LEDGER_DB_NAME:-ledger_db}
+      DB_USER: ${LEDGER_DB_USER:-ledger_user}
+      DB_PASSWORD: ${LEDGER_DB_PASSWORD:-ledger_pass}
+      DATABASE_URL: postgres://${LEDGER_DB_USER:-ledger_user}:${LEDGER_DB_PASSWORD:-ledger_pass}@postgres:5432/${LEDGER_DB_NAME:-ledger_db}
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - vaultline-network
+
+  payments-service:
+    build:
+      context: .
+      dockerfile: services/payments-service/Dockerfile
+    container_name: vaultline-payments-service
+    restart: always
+    ports:
+      - "4003:4003"
+    environment:
+      PORT: 4003
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - vaultline-network
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    container_name: vaultline-notification-service
+    restart: always
+    ports:
+      - "4004:4004"
+    environment:
+      PORT: 4004
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - vaultline-network
+
+  fraud-audit-service:
+    build:
+      context: .
+      dockerfile: services/fraud-audit-service/Dockerfile
+    container_name: vaultline-fraud-audit-service
+    restart: always
+    ports:
+      - "4005:4005"
+    environment:
+      PORT: 4005
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${FRAUD_DB_NAME:-fraud_db}
+      DB_USER: ${FRAUD_DB_USER:-fraud_user}
+      DB_PASSWORD: ${FRAUD_DB_PASSWORD:-fraud_pass}
+      DATABASE_URL: postgres://${FRAUD_DB_USER:-fraud_user}:${FRAUD_DB_PASSWORD:-fraud_pass}@postgres:5432/${FRAUD_DB_NAME:-fraud_db}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - vaultline-network
+
+  # ─── API Gateway Layer ───────────────────────────────────────────────
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    container_name: vaultline-gateway
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: 8000
+      AUTH_SERVICE_URL: http://auth-service:4001
+      LEDGER_SERVICE_URL: http://ledger-service:4002
+      PAYMENTS_SERVICE_URL: http://payments-service:4003
+      FRAUD_AUDIT_SERVICE_URL: http://fraud-audit-service:4005
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-super_secret_jwt_key_vaultline}
+    depends_on:
+      - auth-service
+      - ledger-service
+      - payments-service
+      - fraud-audit-service
+      - redis
+    networks:
+      - vaultline-network
+
+  # ─── Web Frontend Layer ──────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    container_name: vaultline-web
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      NEXT_PUBLIC_GATEWAY_URL: http://localhost:8000
+    depends_on:
+      - gateway
+    networks:
+      - vaultline-network
+
+networks:
+  vaultline-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
+  grafana_data:

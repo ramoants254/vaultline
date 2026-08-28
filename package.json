@@ -1,0 +1,39 @@
+{
+  "name": "vaultline-root",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Vaultline Fintech Platform – monorepo root",
+  "workspaces": [
+    "gateway",
+    "web",
+    "services/auth-service",
+    "services/ledger-service",
+    "services/payments-service",
+    "services/notification-service",
+    "services/fraud-audit-service"
+  ],
+  "scripts": {
+    "install:all": "npm install",
+
+    "build:all": "npm run build --workspaces --if-present",
+
+    "migrate:all": "npm run build --workspace=services/auth-service --workspace=services/ledger-service --workspace=services/fraud-audit-service && npm run db:migrate --workspace=services/auth-service && npm run db:migrate --workspace=services/ledger-service && npm run db:migrate --workspace=services/fraud-audit-service",
+
+    "dev:web": "npm run dev --workspace=web",
+
+    "dev:all": "concurrently --kill-others-on-fail -n gateway,auth,ledger,payments,notif,fraud,web -c cyan,blue,green,yellow,magenta,red,white \"npm run dev --workspace=gateway\" \"npm run dev --workspace=services/auth-service\" \"npm run dev --workspace=services/ledger-service\" \"npm run dev --workspace=services/payments-service\" \"npm run dev --workspace=services/notification-service\" \"npm run dev --workspace=services/fraud-audit-service\" \"npm run dev --workspace=web\"",
+
+    "start:all": "concurrently --kill-others-on-fail -n gateway,auth,ledger,payments,notif,fraud -c cyan,blue,green,yellow,magenta,red \"npm run start --workspace=gateway\" \"npm run start --workspace=services/auth-service\" \"npm run start --workspace=services/ledger-service\" \"npm run start --workspace=services/payments-service\" \"npm run start --workspace=services/notification-service\" \"npm run start --workspace=services/fraud-audit-service\"",
+
+    "test:all": "npm run test --workspaces --if-present",
+
+    "infra:up": "docker compose up -d postgres redis rabbitmq",
+    "infra:down": "docker compose down",
+    "infra:reset": "docker compose down -v && docker compose up -d",
+
+    "setup": "npm install && npm run infra:up && echo '\\n✅  Infrastructure is up. Run npm run migrate:all once DBs are ready, then npm run dev:all'"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

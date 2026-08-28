@@ -1,0 +1,31 @@
+{
+  "name": "auth-service",
+  "version": "1.0.0",
+  "description": "Vaultline Auth & Identity Service",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "db:migrate": "node dist/db/migrate.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "@fastify/jwt": "^8.0.1",
+    "amqplib": "^0.10.4",
+    "argon2": "^0.40.1",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.26.2",
+    "ioredis": "^5.3.2",
+    "pg": "^8.11.5",
+    "prom-client": "^15.1.3",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/amqplib": "^0.10.5",
+    "@types/node": "^20.11.30",
+    "@types/pg": "^8.11.4",
+    "tsx": "^4.7.1",
+    "typescript": "^5.4.3"
+  }
+}
