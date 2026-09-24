@@ -49,8 +49,7 @@ app.get('/metrics', async (req, res) => {
   res.end(await prometheusClient.register.metrics());
 });
 
-// ROUTE 1: Auth Service (Public endpoints)
-app.use('/api/v1/auth', proxy(AUTH_URL, {
+// ROUTE 1: Auth Service (Public endpoints)app.use('/api/v1/auth', proxy(AUTH_URL, {
   proxyReqPathResolver: (req) => `/auth${req.url}`,
 }));
 
@@ -59,7 +58,20 @@ app.use('/api/v1/ledger', verifyJwt, proxy(LEDGER_URL, {
   proxyReqPathResolver: (req) => `/ledger${req.url}`,
 }));
 
-// ROUTE 3: Payments Service (Protected by Gateway JWT check)
+// ROUTE 3a: M-Pesa callbacks — PUBLIC (Safaricom servers POST here without JWT)
+// Must be registered BEFORE the JWT-protected /api/v1/payments route.
+const mpesaCallbackPaths = [
+  '/api/v1/payments/mpesa/stk-callback',
+  '/api/v1/payments/mpesa/b2c-result',
+  '/api/v1/payments/mpesa/b2c-timeout',
+];
+mpesaCallbackPaths.forEach((callbackPath) => {
+  app.use(callbackPath, proxy(PAYMENTS_URL, {
+    proxyReqPathResolver: (req) => `/payments/mpesa/${callbackPath.split('/mpesa/')[1]}`,
+  }));
+});
+
+// ROUTE 3b: Payments Service (Protected by Gateway JWT check)
 app.use('/api/v1/payments', verifyJwt, proxy(PAYMENTS_URL, {
   proxyReqPathResolver: (req) => `/payments${req.url}`,
 }));

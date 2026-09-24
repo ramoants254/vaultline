@@ -1,4 +1,4 @@
-# 🏦 Vaultline Fintech Platform
+# Vaultline 🏦
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-v20+-green.svg)](https://nodejs.org)
@@ -7,255 +7,266 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-v16-blue.svg)](https://www.postgresql.org)
 [![Redis](https://img.shields.io/badge/Redis-v7-red.svg)](https://redis.io)
 [![RabbitMQ](https://img.shields.io/badge/RabbitMQ-v3-orange.svg)](https://www.rabbitmq.com)
+[![M-Pesa](https://img.shields.io/badge/M--Pesa-Daraja_API-green.svg)](https://developer.safaricom.co.ke)
 
-**Vaultline** is a modern, high-concurrency distributed fintech banking platform built as a monorepo. It features an API Gateway, 5 microservices, asynchronous RabbitMQ message queues, Redis-backed idempotency & token management, PostgreSQL double-entry accounting with `SERIALIZABLE` isolation, real-time fraud monitoring, and an executive Next.js dark-mode dashboard.
+> *A distributed fintech platform built because "just use Stripe" wasn't interesting enough.*
+
+Vaultline is a full-stack, production-grade banking platform monorepo. Under the hood: an API Gateway routing to 5 microservices, double-entry accounting enforced at the database level, Redis idempotency locks so nobody gets charged twice, an event-driven pipeline over RabbitMQ, real-time fraud detection, and an M-Pesa Daraja integration for mobile money — all wrapped in a glassmorphism dark-mode dashboard that slaps.
 
 ---
 
-## 📐 Architecture Overview
+## What's inside?
+
+| Piece | Tech | Job |
+|---|---|---|
+| `web` | Next.js 16, React 19, Vanilla CSS | The dashboard — glassmorphism UI, live transaction feeds, fraud alerts, auth flows |
+| `gateway` | Express.js, TypeScript | The front door — JWT verification, rate limiting, correlation IDs, proxying |
+| `services/auth-service` | Express.js, PostgreSQL, Redis | Who are you? — Argon2id hashing, JWT issuance, refresh token blacklisting |
+| `services/ledger-service` | NestJS, PostgreSQL | The accountant — double-entry journals, SERIALIZABLE isolation, balance tracking |
+| `services/payments-service` | NestJS, Redis, RabbitMQ | Money moves — card deposits, M-Pesa STK Push, B2C payouts, idempotency |
+| `services/fraud-audit-service` | Express.js, PostgreSQL | The suspicious one — rule engine, velocity checks, immutable audit logs |
+| `services/notification-service` | NestJS, RabbitMQ | Keeps you posted — transaction receipts, alerts, real-time dispatches |
+
+---
+
+## Architecture
+
+Every client request hits the **API Gateway** first, which checks your JWT, slaps a correlation ID on the request, and proxies it to the right microservice. Payments publish events to a RabbitMQ topic exchange, and three separate consumers (Ledger, Fraud, Notifications) pick them up independently. Nobody is waiting on anybody.
 
 ```
-                          ┌─────────────────────────────┐
-                          │   Next.js 14/16 Dashboard   │
-                          │     (http://localhost:3000) │
-                          └──────────────┬──────────────┘
-                                         │ REST API / JWT
-                                         ▼
-                          ┌─────────────────────────────┐
-                          │      Express API Gateway    │
-                          │     (http://localhost:8000) │
-                          └──────┬───────┬───────┬──────┘
-                                 │       │       │
-             ┌───────────────────┘       │       └───────────────────┐
-             ▼                           ▼                           ▼
-  ┌──────────────────┐        ┌──────────────────┐        ┌──────────────────┐
-  │   Auth Service   │        │  Ledger Service  │        │ Payments Service │
-  │    (Port 4001)   │        │    (Port 4002)   │        │    (Port 4003)   │
-  └────────┬─────────┘        └────────┬─────────┘        └────────┬─────────┘
-           │                           │                           │
-           │ Argon2 / JWT              │ SERIALIZABLE Tx           │ Redis Idempotency
-           ▼                           ▼                           ▼
-  ┌──────────────────┐        ┌──────────────────┐        ┌──────────────────┐
-  │ Auth PostgreSQL  │        │ Ledger PostgreSQL│        │ Payments Redis   │
-  └──────────────────┘        └──────────────────┘        └────────┬─────────┘
-                                                                   │
-                                                                   │ Events (AMQP)
-                                                                   ▼
-                                                       ┌──────────────────────┐
-                                                       │   RabbitMQ Broker    │
-                                                       │  payment.completed   │
-                                                       │    payment.failed    │
-                                                       └──────────┬───────────┘
-                                                                  │
-                                            ┌─────────────────────┴─────────────────────┐
-                                            ▼                                           ▼
-                                 ┌────────────────────┐                      ┌────────────────────┐
-                                 │ Fraud-Audit Service│                      │Notification Service│
-                                 │    (Port 4005)     │                      │    (Port 4004)     │
-                                 └─────────┬──────────┘                      └────────────────────┘
-                                           │
+                    ┌────────────────────────────┐
+                    │   Next.js Dashboard :3000  │
+                    └─────────────┬──────────────┘
+                                  │ REST / JWT
+                                  ▼
+                    ┌────────────────────────────┐
+                    │    API Gateway  :8000      │
+                    │  JWT · Rate Limit · CORS   │
+                    └────┬─────────┬────────┬────┘
+                         │         │        │
+              ┌──────────┘         │        └──────────┐
+              ▼                    ▼                    ▼
+   ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+   │  Auth  :4001     │  │  Ledger  :4002   │  │ Payments :4003   │
+   │  Argon2 · JWT    │  │  SERIALIZABLE Tx │  │ M-Pesa · Stripe  │
+   │  PostgreSQL      │  │  PostgreSQL      │  │ Redis · RabbitMQ │
+   └──────────────────┘  └──────────────────┘  └────────┬─────────┘
+                                                         │
+                                              Events (AMQP)
+                                                         ▼
+                                           ┌─────────────────────┐
+                                           │  RabbitMQ Broker    │
+                                           │  vaultline_events   │
+                                           │  payment.completed  │
+                                           │  payment.failed     │
+                                           └──────┬──────────────┘
+                                                  │
+                              ┌───────────────────┴──────────────────┐
+                              ▼                                       ▼
+                   ┌──────────────────────┐             ┌──────────────────────┐
+                   │ Fraud-Audit  :4005   │             │ Notification :4004   │
+                   │ Rule engine          │             │ Receipts · Alerts    │
+                   │ PostgreSQL           │             │ RabbitMQ consumer    │
+                   └──────────────────────┘             └──────────────────────┘
 ```
 
 ---
 
-## 🌟 Key System Highlights
+## What actually makes this interesting
 
-1. **Strict Double-Entry Accounting Invariant**:
-   - The Ledger Service enforces `Total DEBIT == Total CREDIT` on every journal entry transaction line.
-   - Executes under **PostgreSQL `SERIALIZABLE` isolation** with explicit row locks (`FOR UPDATE`) to guarantee zero race conditions and enforce non-negative wallet constraints (`CHECK (balance >= 0)`).
+### 🧾 Double-Entry Accounting — for real
+Every money movement creates a balanced journal entry: `DEBIT == CREDIT`, always. This isn't a "balance" column in a users table. The Ledger Service enforces the accounting invariant at the database level using `SERIALIZABLE` isolation and row-level `FOR UPDATE` locks. You cannot overdraft. You cannot have a race condition sneak in a phantom read. PostgreSQL will fight you.
 
-2. **Idempotency Guarantee**:
+### 🔁 Idempotency — no double charges, ever
+Every payment endpoint requires an `X-Idempotency-Key` header. The payments service sets a Redis `LOCKED` sentinel before processing, then replaces it with the cached result. Hit the same endpoint with the same key twice? You get the same response. Your webhook retry loop is not our problem.
 
-3. **Event-Driven Architecture**:
-   - Decoupled event publication via RabbitMQ queues. Payment events (`payment.completed`, `payment.failed`) automatically trigger asynchronous ledger entry posting, fraud detection rule evaluations, and notification dispatching.
+### 📨 Event-Driven — loose coupling, high throughput
+Payments don't call Ledger. They don't call Fraud. They don't call Notifications. They publish one event to the `vaultline_events` RabbitMQ exchange and go home. Three consumers pick it up independently and do their thing. Scale any of them without touching payments. Outage in Notifications? Ledger doesn't care.
 
-4. **Real-time Fraud & Immutable Audit Logging**:
-   - Asynchronous rule engine evaluating transactions for high-risk flags (e.g., high-velocity deposits, extreme amounts).
-   - Stores immutable system event logs and severity-badged alert records (`HIGH`, `MEDIUM`, `LOW`).
+### 📱 M-Pesa Daraja — mobile money, properly
+Not a stub. Not a TODO. The Payments Service has a full Daraja integration:
+- **STK Push** — triggers a USSD prompt on the customer's phone
+- **B2C Payouts** — sends money from the business shortcode back to a customer's M-Pesa wallet
+- **OAuth token caching** — the Daraja access token is cached in Redis for 55 minutes so we're not re-authenticating on every request
+- **Async callback handling** — Safaricom's servers POST back to `/api/v1/payments/mpesa/stk-callback` (no JWT, whitelisted at the gateway), which resolves the pending context from Redis and fires the same `payment.completed` event into RabbitMQ as any other payment
 
-5. **Security & Authentication**:
-   - Passwords hashed with **Argon2id**.
-   - Short-lived JWT Access Tokens with Refresh Tokens stored/blacklisted in Redis.
-   - API Gateway rate-limiting (`express-rate-limit` + Redis store) and correlation ID propagation.
+### 🚨 Fraud Detection — async, not in the way
+The Fraud-Audit Service consumes every payment event and runs it through a velocity rule engine (high-frequency deposits, extreme amounts, suspicious patterns). Alerts are tagged `HIGH`, `MEDIUM`, or `LOW`. All of this happens after the payment — it doesn't slow down the happy path.
 
-6. **Executive Dashboard**:
-   - Glassmorphism dark-mode interface built with Next.js App Router, custom HSL design tokens, micro-animations, and live transaction feeds.
-
----
-
-## 🗂 Workspace & Services Structure
-
-|---|---|---|---|
-| [`web`](file:///home/relego/Documents/PROJECTS/Fintech/vaultline/web) | **Web Dashboard** | Next.js 14/16, React, CSS Modules | Executive user portal (Auth, Ledger history, Deposit/Transfer forms, Fraud alerts, Audit logs) |
-| [`gateway`](file:///home/relego/Documents/PROJECTS/Fintech/vaultline/gateway) | **API Gateway** | Express.js, TypeScript | Central routing, CORS, JWT verification middleware, rate-limiting, proxying |
-| [`services/auth-service`](file:///home/relego/Documents/PROJECTS/Fintech/vaultline/services/auth-service) | **Auth Service** | Express.js, PostgreSQL, Redis | User registration, Argon2 verification, JWT issuance, refresh token revocation |
-| [`services/ledger-service`](file:///home/relego/Documents/PROJECTS/Fintech/vaultline/services/ledger-service) | **Ledger Service** | NestJS, PostgreSQL | Double-entry journal & ledger engine, serializable accounting transactions, balance tracking |
-| [`services/payments-service`](file:///home/relego/Documents/PROJECTS/Fintech/vaultline/services/payments-service) | **Payments Service** | NestJS, Redis, RabbitMQ | Payment orchestration, external gateway provider stub, idempotency lock manager |
-| [`services/fraud-audit-service`](file:///home/relego/Documents/PROJECTS/Fintech/vaultline/services/fraud-audit-service) | **Fraud & Audit** | Express.js, PostgreSQL | RabbitMQ consumer, rule evaluation engine, fraud alert stream, immutable system audit logs |
-| [`services/notification-service`](file:///home/relego/Documents/PROJECTS/Fintech/vaultline/services/notification-service) | **Notification** | NestJS, RabbitMQ | Event consumer sending real-time user transaction alerts and receipt emails |
+### 🔒 Security that actually thought about things
+- Passwords hashed with **Argon2id** (not bcrypt, not SHA-256)
+- Short-lived JWT access tokens + Redis-blacklisted refresh tokens
+- Gateway-level rate limiting backed by Redis (not in-memory, survives restarts)
+- Correlation IDs on every request, propagated through the entire chain
 
 ---
 
-## 🛠 Tech Stack
+## Getting it running
 
-- **Frontend**: Next.js 14/16 (App Router), React 19, TypeScript, Vanilla CSS (HSL design tokens & Glassmorphism), Recharts
-- **Backend Frameworks**: NestJS, Express.js
-- **Languages**: TypeScript, Node.js (v20+)
-- **Databases**: PostgreSQL 16 (isolated microservice DB schemas)
-- **Cache & Locks**: Redis 7
-- **Message Broker**: RabbitMQ 3.x (AMQP)
-- **Containerization**: Docker, Docker Compose
-- **Cryptography**: Argon2id, JSON Web Tokens (JWT)
+### Option A — just Docker
 
----
-
-## ⚡ Quick Start & Setup
-
-### 🐳 Option A: Production Standard (Full Docker Containerization)
-
-Run the **entire stack** (Databases, Redis, RabbitMQ, 5 Microservices, API Gateway, and Web Dashboard) with a single command:
+Spins everything up: Postgres (×3 isolated DBs), Redis, RabbitMQ, 5 microservices, gateway, and the Next.js dashboard.
 
 ```bash
 docker compose up --build -d
-```
-
-Once running, run database migrations inside the containers:
-```bash
 npm run migrate:all
 ```
 
-The application is now fully running:
-- **Web Dashboard**: `http://localhost:3000`
-- **API Gateway**: `http://localhost:8000`
-- **RabbitMQ Management**: `http://localhost:15672` (`vaultline_mq` / `mq_secret_pass`)
-- **Prometheus**: `http://localhost:9090`
-- **Grafana**: `http://localhost:3001` (`admin` / `admin`)
+Then open:
+- **Dashboard** → `http://localhost:3000`
+- **API Gateway** → `http://localhost:8000`
+- **RabbitMQ console** → `http://localhost:15672` · `vaultline_mq` / `mq_secret_pass`
+- **Grafana** → `http://localhost:3001` · `admin` / `admin`
+- **Prometheus** → `http://localhost:9090`
 
-Account numbers are generated by the Ledger Service in `VL` plus 10-digit
-format. The browser does not generate or accept account numbers.
+> Account numbers are generated by the Ledger Service in `VL` + 10-digit format. Don't try to make one up in the browser.
 
-### 💻 Option B: Local Development Mode (Hybrid Hot-Reloading)
+### Option B — local dev with hot-reload
 
-For rapid local code iteration with instant TypeScript hot-reloading:
-
-1. **Start Infrastructure in Docker**:
-   ```bash
-   npm run infra:up
-   ```
-2. **Run Migrations**:
-   ```bash
-   npm run migrate:all
-   ```
-3. **Launch All Services & Web Dashboard Concurrently**:
-   ```bash
-   npm run dev:all
-   ```
-
-Open `http://localhost:3000` to access the Vaultline Dashboard!
-
----
-
-## 📜 Monorepo NPM Commands
-
-| Command | Description |
-|---|---|
-| `npm run setup` | Installs dependencies, launches Docker infra (`postgres`, `redis`, `rabbitmq`) |
-| `npm run dev:all` | Runs all microservices, API Gateway, and Next.js Web Dashboard concurrently |
-| `npm run dev:web` | Starts only the Next.js frontend workspace |
-| `npm run build:all` | Builds TypeScript across all microservices and the Next.js production bundle |
-| `npm run migrate:all` | Compiles and executes migrations for Auth, Ledger, and Fraud databases |
-| `npm run infra:up` | Starts Docker Compose background infrastructure (`docker compose up -d`) |
-| `npm run infra:down` | Stops Docker Compose infrastructure |
-| `npm run infra:reset` | Tears down volumes and recreates clean database/redis instances |
-| `npm run test:all` | Executes test suites across all workspaces |
-
----
-
-## 📊 Observability
-
-The Docker stack includes Prometheus, Grafana, RabbitMQ metrics, PostgreSQL
-metrics, and Redis metrics. Every backend service exposes `/metrics`, and
-services expose health endpoints for liveness/readiness checks.
-
-Open the pre-provisioned **Vaultline Overview** dashboard at:
-
-```text
-http://localhost:3001
-Username: admin
-Password: admin
-```
-
-Check Prometheus scrape status at `http://localhost:9090/targets`.
-
-Useful checks:
+Keep infra in Docker, run services locally with TypeScript watch mode:
 
 ```bash
+npm run infra:up      # Postgres, Redis, RabbitMQ in Docker
+npm run migrate:all   # Run DB migrations
+npm run dev:all       # All services + dashboard with hot-reload
+```
+
+---
+
+## M-Pesa Setup
+
+To use the M-Pesa integration you'll need:
+
+1. **A Daraja app** — free account at [developer.safaricom.co.ke](https://developer.safaricom.co.ke). Grab your `Consumer Key` and `Consumer Secret`.
+
+2. **A public callback URL** — Safaricom's servers need to reach yours. In development, `ngrok` is your friend:
+   ```bash
+   ngrok http 8000
+   ```
+
+3. **Fill in `.env`**:
+   ```env
+   MPESA_CONSUMER_KEY=your_key
+   MPESA_CONSUMER_SECRET=your_secret
+   MPESA_SHORTCODE=174379          # sandbox default
+   MPESA_PASSKEY=bfb279f9aa9...    # sandbox default (pre-filled)
+   MPESA_CALLBACK_BASE_URL=https://your-ngrok-url.ngrok.io
+   MPESA_ENVIRONMENT=sandbox
+   ```
+
+4. **Test it** — Safaricom's sandbox test number is `254708374149`. It won't actually ring anyone's phone.
+
+**Deposit flow:**
+```
+POST /api/v1/payments/mpesa/deposit
+X-Idempotency-Key: <uuid>
+{ "phoneNumber": "254708374149", "amount": 500, ... }
+
+→ Returns { status: "PENDING", checkoutRequestId: "ws_CO_..." }
+→ Safaricom POSTs back to /api/v1/payments/mpesa/stk-callback
+→ payment.completed fires on RabbitMQ
+→ Ledger posts the entry, Fraud checks it, Notification sends receipt
+```
+
+---
+
+## API Reference
+
+All routes go through `http://localhost:8000`.
+
+### Auth — no JWT needed
+```
+POST /api/v1/auth/register      Create an account
+POST /api/v1/auth/login         Get access + refresh tokens
+POST /api/v1/auth/logout        Blacklist the refresh token
+```
+
+### Ledger — JWT required
+```
+POST /api/v1/ledger/accounts              Create a wallet account (ASSET, LIABILITY…)
+GET  /api/v1/ledger/accounts              Your accounts
+GET  /api/v1/ledger/accounts/:id/balance  Balance + metadata
+GET  /api/v1/ledger/accounts/:id/history  Full double-entry history
+POST /api/v1/ledger/entries               Post a raw journal entry
+```
+
+### Payments — JWT + X-Idempotency-Key required
+```
+POST /api/v1/payments/deposit           Card/external deposit
+POST /api/v1/payments/transfer          Peer-to-peer transfer
+POST /api/v1/payments/mpesa/deposit     M-Pesa STK Push (async)
+POST /api/v1/payments/mpesa/withdraw    M-Pesa B2C payout (async)
+```
+
+### Fraud & Audit — JWT required
+```
+GET /api/v1/fraud/fraud-alerts    Detected alerts with severity ratings
+GET /api/v1/fraud/audit-logs      Immutable system event log
+```
+
+### M-Pesa Callbacks — public (Safaricom posts here, no JWT)
+```
+POST /api/v1/payments/mpesa/stk-callback   STK Push result
+POST /api/v1/payments/mpesa/b2c-result     B2C payout result
+POST /api/v1/payments/mpesa/b2c-timeout    B2C timeout
+```
+
+---
+
+## Monorepo commands
+
+```bash
+npm run setup         # Install deps + start Docker infra
+npm run dev:all       # Everything, hot-reload
+npm run dev:web       # Just the Next.js frontend
+npm run build:all     # TypeScript build across all services
+npm run migrate:all   # Run DB migrations (Auth, Ledger, Fraud)
+npm run infra:up      # docker compose up -d
+npm run infra:down    # docker compose down
+npm run infra:reset   # Nuke volumes, fresh DBs
+npm run test:all      # Run test suites
+```
+
+---
+
+## Observability
+
+Every service exposes `/health` and `/metrics`. The Docker stack ships with Prometheus scraping all of them and a pre-provisioned Grafana dashboard.
+
+```bash
+# Is everything alive?
 curl http://localhost:8000/health
-curl http://localhost:8000/metrics
+
+# Are queues draining?
 docker compose exec rabbitmq rabbitmqctl list_queues name messages consumers
+
+# Follow the money through service logs
+docker compose logs --since=5m payments-service ledger-service fraud-audit-service notification-service
+
+# Overall container health
 docker compose ps
 ```
 
-The RabbitMQ Management console uses the credentials from `.env`:
-
-```text
-Username: vaultline_mq
-Password: mq_secret_pass
-```
+Queues should drain to zero after every payment. If they don't, something is unhappy and the logs will tell you what.
 
 ---
 
-## 🌐 API Gateway Endpoints (`http://localhost:8000`)
+## Tech stack
 
-All client requests flow through the API Gateway:
-
-### Auth Routes (`/api/v1/auth`)
-- `POST /api/v1/auth/register` — Register a new user
-- `POST /api/v1/auth/login` — Authenticate and receive Access & Refresh JWTs
-- `POST /api/v1/auth/logout` — Revoke and blacklist refresh token in Redis
-
-### Ledger Routes (`/api/v1/ledger`) *(JWT Protected)*
-- `POST /api/v1/ledger/accounts` — Create ledger account (`ASSET`, `LIABILITY`, `EQUITY`, `REVENUE`, `EXPENSE`)
-- `GET /api/v1/ledger/accounts` — List accounts owned by the authenticated user
-- `GET /api/v1/ledger/accounts/:id/balance` — Fetch account balance & metadata
-- `GET /api/v1/ledger/accounts/:id/history` — Fetch double-entry transaction ledger entries
-- `POST /api/v1/ledger/entries` — Post raw double-entry journal entry
-
-### Payments Routes (`/api/v1/payments`) *(JWT Protected + Idempotent)*
-- `POST /api/v1/payments/deposit` — Process external deposit (Requires `X-Idempotency-Key` header)
-- `POST /api/v1/payments/transfer` — Peer-to-peer account transfer (Requires `X-Idempotency-Key` header)
-
-### Fraud & Audit Routes (`/api/v1/fraud`) *(JWT Protected)*
-- `GET /api/v1/fraud/fraud-alerts` — List detected fraud alerts & severity ratings
-- `GET /api/v1/fraud/audit-logs` — Query immutable system audit log stream
+| Layer | Choices |
+|---|---|
+| **Frontend** | Next.js 16, React 19, TypeScript, Vanilla CSS (HSL tokens, glassmorphism) |
+| **Backend** | NestJS (Ledger, Payments, Notifications), Express.js (Auth, Fraud, Gateway) |
+| **Databases** | PostgreSQL 16 — one isolated schema per service |
+| **Cache / Locks** | Redis 7 — idempotency keys, token blacklist, M-Pesa OAuth cache |
+| **Messaging** | RabbitMQ 3.x — AMQP topic exchange, durable queues |
+| **Mobile Money** | Safaricom M-Pesa Daraja API — STK Push + B2C |
+| **Auth** | Argon2id, JWT (access + refresh), Redis blacklisting |
+| **Observability** | Prometheus + Grafana, per-service `/metrics` endpoints |
+| **Infrastructure** | Docker, Docker Compose |
 
 ---
 
-## 🔒 Security & Reliability Architecture
+## License
 
-- **PostgreSQL Isolation**: Accounting entries use `BEGIN ISOLATION LEVEL SERIALIZABLE` to prevent phantom reads, write skew, or race conditions during concurrent payments.
-- **Idempotency Locking**: Payments utilize Redis `SET key value NX PX 10000` locks to prevent double-spending or duplicate charges.
-- **Token Blacklisting**: Revoked tokens are saved in Redis with TTL equal to the remaining JWT duration.
-- **Microservice Autonomy**: Each service owns its database instance/schema, communicating asynchronously via RabbitMQ AMQP messaging.
-
-### Event-Driven Verification
-
-Payments publishes `payment.completed` or `payment.failed` to the durable
-`vaultline_events` topic exchange. Ledger, Fraud/Audit, and Notification each
-consume the event independently.
-
-To verify the flow, log in, create or select a wallet account, submit a deposit,
-then check the wallet balance, Ledger history, Audit Log, and service logs.
-
-```bash
-docker compose logs --since=5m payments-service ledger-service fraud-audit-service notification-service
-docker compose exec rabbitmq rabbitmqctl list_queues name messages consumers
-```
-
-Queues should return to zero pending messages after successful processing.
-
----
-
-## 📝 License
-
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+MIT — do whatever you want with it.
