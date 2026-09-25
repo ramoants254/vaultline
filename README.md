@@ -227,6 +227,68 @@ npm run infra:reset   # Nuke volumes, fresh DBs
 npm run test:all      # Run test suites
 ```
 
+## Kubernetes and Helm
+
+Vaultline includes an application Helm chart at `deploy/helm/vaultline`. The chart deploys the web frontend, API gateway, and backend services. It intentionally does not install PostgreSQL, Redis, RabbitMQ, Prometheus, or Grafana; provide those dependencies separately in a cluster or continue using Docker Compose for local infrastructure.
+
+### Chart validation
+
+```bash
+helm lint deploy/helm/vaultline
+helm template vaultline deploy/helm/vaultline -f deploy/helm/vaultline/values-dev.yaml
+```
+
+These checks also run in GitHub Actions. A live Kubernetes cluster is not required for linting or rendering.
+
+### Local Kubernetes deployment
+
+Build and publish the seven application images to a registry accessible by the cluster, then update the registry and tag in `deploy/helm/vaultline/values-dev.yaml`. Create the required secrets outside the chart:
+
+```bash
+kubectl create secret generic vaultline-secrets \
+   --from-literal=jwt-secret='replace-me' \
+   --from-literal=jwt-refresh-secret='replace-me' \
+   --from-literal=auth-database-url='postgres://auth_user:password@postgres:5432/auth_db' \
+   --from-literal=ledger-database-url='postgres://ledger_user:password@postgres:5432/ledger_db' \
+   --from-literal=fraud-database-url='postgres://fraud_user:password@postgres:5432/fraud_db'
+
+helm upgrade --install vaultline deploy/helm/vaultline \
+   -f deploy/helm/vaultline/values-dev.yaml
+
+kubectl get pods
+kubectl get services
+```
+
+The default chart exposes only ClusterIP services. Enable and configure the Ingress after an Ingress controller and DNS are available:
+
+```bash
+helm upgrade --install vaultline deploy/helm/vaultline \
+   -f deploy/helm/vaultline/values-dev.yaml \
+   --set ingress.enabled=true
+```
+
+Set `services.web.env.NEXT_PUBLIC_GATEWAY_URL` to the browser-reachable gateway URL. Kubernetes-only names such as `gateway:8000` must not be used for this frontend value.
+
+### Database migrations
+
+Migrations are disabled by default. After PostgreSQL is available and the secret values are configured, enable the chart's migration Jobs for a controlled install or upgrade:
+
+```bash
+helm upgrade --install vaultline deploy/helm/vaultline \
+   -f deploy/helm/vaultline/values-dev.yaml \
+   --set migrations.enabled=true
+```
+
+The migration Jobs run for auth, ledger, and fraud-audit using each service's compiled migration command. Keep migrations separate from application startup so multiple replicas cannot race to migrate the same database.
+
+### Production recommendations
+
+- Use immutable image tags or image digests instead of `dev`.
+- Store `vaultline-secrets` in an external secret manager or sealed-secret workflow.
+- Use managed PostgreSQL, Redis, and RabbitMQ where possible.
+- Set CPU and memory requests/limits in environment-specific values files.
+- Add TLS, network policies, PodDisruptionBudgets, and autoscaling before production rollout.
+
 ---
 
 ## Observability

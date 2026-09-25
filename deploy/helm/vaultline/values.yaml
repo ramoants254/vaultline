@@ -1,0 +1,188 @@
+nameOverride: ""
+fullnameOverride: ""
+
+imagePullSecrets: []
+
+images:
+  registry: ghcr.io/your-org/vaultline
+  pullPolicy: IfNotPresent
+  tag: "1.0.0"
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+services:
+  gateway:
+    enabled: true
+    image: gateway
+    port: 8000
+    replicas: 2
+    public: true
+    env:
+      PORT: "8000"
+      AUTH_SERVICE_URL: http://auth-service:4001
+      LEDGER_SERVICE_URL: http://ledger-service:4002
+      PAYMENTS_SERVICE_URL: http://payments-service:4003
+      FRAUD_AUDIT_SERVICE_URL: http://fraud-audit-service:4005
+      REDIS_URL: redis://redis:6379
+    secretEnv:
+      - name: JWT_SECRET
+        secretKeyRef:
+          name: vaultline-secrets
+          key: jwt-secret
+    readinessPath: /health
+    livenessPath: /health
+    resources: {}
+
+  web:
+    enabled: true
+    image: web
+    port: 3000
+    replicas: 2
+    public: true
+    env:
+      PORT: "3000"
+      NEXT_PUBLIC_GATEWAY_URL: https://api.vaultline.example
+    readinessPath: /
+    livenessPath: /
+    resources: {}
+
+  auth-service:
+    enabled: true
+    image: auth-service
+    port: 4001
+    replicas: 2
+    env:
+      PORT: "4001"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://rabbitmq:5672
+    secretEnv:
+      - name: DATABASE_URL
+        secretKeyRef:
+          name: vaultline-secrets
+          key: auth-database-url
+      - name: JWT_SECRET
+        secretKeyRef:
+          name: vaultline-secrets
+          key: jwt-secret
+      - name: JWT_REFRESH_SECRET
+        secretKeyRef:
+          name: vaultline-secrets
+          key: jwt-refresh-secret
+    readinessPath: /health
+    livenessPath: /health
+    resources: {}
+
+  ledger-service:
+    enabled: true
+    image: ledger-service
+    port: 4002
+    replicas: 2
+    env:
+      PORT: "4002"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      RABBITMQ_URL: amqp://rabbitmq:5672
+    secretEnv:
+      - name: DATABASE_URL
+        secretKeyRef:
+          name: vaultline-secrets
+          key: ledger-database-url
+    readinessPath: /readiness
+    livenessPath: /health
+    resources: {}
+
+  payments-service:
+    enabled: true
+    image: payments-service
+    port: 4003
+    replicas: 2
+    env:
+      PORT: "4003"
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://rabbitmq:5672
+    readinessPath: /readiness
+    livenessPath: /health
+    resources: {}
+
+  notification-service:
+    enabled: true
+    image: notification-service
+    port: 4004
+    replicas: 2
+    env:
+      PORT: "4004"
+      RABBITMQ_URL: amqp://rabbitmq:5672
+    readinessPath: /health
+    livenessPath: /health
+    resources: {}
+
+  fraud-audit-service:
+    enabled: true
+    image: fraud-audit-service
+    port: 4005
+    replicas: 2
+    env:
+      PORT: "4005"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://rabbitmq:5672
+    secretEnv:
+      - name: DATABASE_URL
+        secretKeyRef:
+          name: vaultline-secrets
+          key: fraud-database-url
+    readinessPath: /health
+    livenessPath: /health
+    resources: {}
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: vaultline.example
+      paths:
+        - path: /
+          pathType: Prefix
+          service: web
+        - path: /api
+          pathType: Prefix
+          service: gateway
+  tls: []
+
+migrations:
+  enabled: false
+  backoffLimit: 4
+  services:
+    - name: auth-service
+      image: auth-service
+      command: ["node", "dist/db/migrate.js"]
+    - name: ledger-service
+      image: ledger-service
+      command: ["node", "dist/database/migrate.js"]
+    - name: fraud-audit-service
+      image: fraud-audit-service
+      command: ["node", "dist/db/migrate.js"]
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

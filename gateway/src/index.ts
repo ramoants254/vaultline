@@ -49,7 +49,8 @@ app.get('/metrics', async (req, res) => {
   res.end(await prometheusClient.register.metrics());
 });
 
-// ROUTE 1: Auth Service (Public endpoints)app.use('/api/v1/auth', proxy(AUTH_URL, {
+// ROUTE 1: Auth Service (Public endpoints)
+app.use('/api/v1/auth', proxy(AUTH_URL, {
   proxyReqPathResolver: (req) => `/auth${req.url}`,
 }));
 

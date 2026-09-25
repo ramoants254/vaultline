@@ -1,0 +1,34 @@
+{{- if .Values.migrations.enabled }}
+{{- range $migration := .Values.migrations.services }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "vaultline.fullname" $ }}-{{ $migration.name }}-migration
+  labels:
+    {{- include "vaultline.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: migration
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ $.Values.migrations.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "vaultline.labels" $ | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ include "vaultline.serviceAccountName" $ }}
+      containers:
+        - name: {{ $migration.name }}-migration
+          image: "{{ $.Values.images.registry }}/{{ $migration.image }}:{{ $.Values.images.tag }}"
+          imagePullPolicy: {{ $.Values.images.pullPolicy }}
+          command:
+            {{- toYaml $migration.command | nindent 12 }}
+          envFrom:
+            - secretRef:
+                name: vaultline-secrets
+{{- end }}
+{{- end }}

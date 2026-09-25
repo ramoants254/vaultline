@@ -1,0 +1,26 @@
+images:
+  registry: localhost:5000/vaultline
+  pullPolicy: IfNotPresent
+  tag: dev
+
+services:
+  gateway:
+    replicas: 1
+  web:
+    replicas: 1
+  auth-service:
+    replicas: 1
+  ledger-service:
+    replicas: 1
+  payments-service:
+    replicas: 1
+  notification-service:
+    replicas: 1
+  fraud-audit-service:
+    replicas: 1
+
+ingress:
+  enabled: false
+
+migrations:
+  enabled: false

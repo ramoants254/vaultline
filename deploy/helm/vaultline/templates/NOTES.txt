@@ -1,0 +1,13 @@
+Vaultline has been deployed.
+
+Application services:
+{{- range $name, $service := .Values.services }}
+{{- if $service.enabled }}
+- {{ $name }}: {{ $name }}:{{ $service.port }}
+{{- end }}
+{{- end }}
+
+Ingress enabled: {{ .Values.ingress.enabled }}
+
+The chart intentionally does not install PostgreSQL, Redis, RabbitMQ, Prometheus, or Grafana.
+Provide those dependencies separately and configure the service environment values before production use.
